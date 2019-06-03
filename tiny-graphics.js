@@ -271,35 +271,32 @@ class Graphics_Card_Object
                                         // a GPU draw command on a context it hasn't seen before.
   constructor() 
     { this.gpu_instances = new Map() }     // Track which GPU contexts this object has copied itself onto.
-  copy_onto_graphics_card( context, intial_gpu_representation )
-    {                           // copy_onto_graphics_card():  Our object might need to register to multiple 
-                                // GPU contexts in the case of multiple drawing areas.  If this is a new GPU
-                                // context for this object, copy the object to the GPU.  Otherwise, this 
-                                // object already has been copied over, so get a pointer to the existing 
-                                // instance.  The instance consists of whatever GPU pointers are associated
-                                // with this object, as returned by the WebGL calls that copied it to the 
-                                // GPU.  GPU-bound objects should override this function, which builds an 
-                                // initial instance, so as to populate it with finished pointers. 
+  copy_onto_graphics_card( context, ...args )
+    {                           // copy_onto_graphics_card():  GPU-bound objects use this function by populating 
+                                // the "gpu instance" object returned here with whatever GPU pointers they need
+                                // to store (after they obtain them by performing WebGL calls).
+    
+                                // Don't let beginners call the expensive copy_onto_graphics_card function
+                                // too many times; beginner WebGL programs typically only need to call it 
+                                // a few times.  Use an "idiot alarm" to warn the user of this.
       const existing_instance = this.gpu_instances.get( context );
-
-                                // Warn the user if they are avoidably making too many GPU objects.  Beginner
-                                // WebGL programs typically only need to call copy_onto_graphics_card once 
-                                // per object; doing it more is expensive, so warn them with an "idiot 
-                                // alarm". Don't trigger the idiot alarm if the user is correctly re-using
+                                // Don't trigger the idiot alarm if the user is correctly re-using
                                 // an existing GPU context and merely overwriting parts of itself.
       if( !existing_instance )
-        { Graphics_Card_Object.idiot_alarm |= 0;     // Start a program-wide counter.
-          if( Graphics_Card_Object.idiot_alarm++ > 200 )
-            throw `Error: You are sending a lot of object definitions to the GPU, probably by mistake!  Many of them are likely duplicates, which you
-                   don't want since sending each one is very slow.  To avoid this, from your display() function avoid ever declaring a Shape Shader
-                   or Texture (or subclass of these) with "new", thus causing the definition to be re-created and re-transmitted every frame.  
-                   Instead, call these in your scene's constructor and keep the result as a class member, or otherwise make sure it only happens 
-                   once.  In the off chance that you have a somehow deformable shape that MUST change every frame, then at least use the special
-                   arguments of copy_onto_graphics_card to limit which buffers get overwritten every frame to only the necessary ones.`;
-        }
-                                                // Check if this object already exists on that GPU context.
+        this.check_idiot_alarm( ...args );
+                                              // Check if this object already exists on that GPU context.
       return existing_instance ||             // If necessary, start a new object associated with the context.
-             this.gpu_instances.set( context, intial_gpu_representation ).get( context );
+             this.gpu_instances.set( context, this.make_gpu_representation() ).get( context );
+    }
+  check_idiot_alarm( args )                      // Warn the user if they are avoidably making too many GPU objects.
+    { Graphics_Card_Object.idiot_alarm |= 0;     // Start a program-wide counter.
+      if( Graphics_Card_Object.idiot_alarm++ > 200 )
+        throw `Error: You are sending a lot of object definitions to the GPU, probably by mistake!  Many of them are likely duplicates, which you
+               don't want since sending each one is very slow.  To avoid this, from your display() function avoid ever declaring a Shape Shader
+               or Texture (or subclass of these) with "new", thus causing the definition to be re-created and re-transmitted every frame.  
+               Instead, call these in your scene's constructor and keep the result as a class member, or otherwise make sure it only happens 
+               once.  In the off chance that you have a somehow deformable shape that MUST change every frame, then at least use the special
+               arguments of copy_onto_graphics_card to limit which buffers get overwritten every frame to only the necessary ones.`;
     }
   activate( context, ...args )
     {                            // activate():  To use, super call it to retrieve a container of GPU 
@@ -307,6 +304,7 @@ class Graphics_Card_Object
                                  // Then do any WebGL calls you need that require GPU pointers.
       return this.gpu_instances.get( context ) || this.copy_onto_graphics_card( context, ...args )
     }
+  make_gpu_representation() {}           // Override this in your subclass, defining a blank container of GPU references for itself.
 }
 
 
@@ -332,14 +330,7 @@ class Vertex_Buffer extends Graphics_Card_Object
                 // their own buffers within any of your existing graphics card contexts.  Optional arguments 
                 // allow calling this again to overwrite the GPU buffers related to this shape's arrays, or 
                 // subsets of them as needed (if only some fields of your shape have changed).
-
-                // Define what this object should store in each new WebGL Context:
-      const initial_gpu_representation = { webGL_buffer_pointers: {} };
-                                // Our object might need to register to multiple GPU contexts in the case of 
-                                // multiple drawing areas.  If this is a new GPU context for this object, 
-                                // copy the object to the GPU.  Otherwise, this object already has been 
-                                // copied over, so get a pointer to the existing instance.
-      const gpu_instance = super.copy_onto_graphics_card( context, initial_gpu_representation );
+      const gpu_instance = super.copy_onto_graphics_card( context, selection_of_arrays, write_to_indices );
 
       const gl = context;
       for( let name of selection_of_arrays )
@@ -353,6 +344,10 @@ class Vertex_Buffer extends Graphics_Card_Object
         gl.bufferData( gl.ELEMENT_ARRAY_BUFFER, new Uint32Array( this.indices ), gl.STATIC_DRAW );
       }
       return gpu_instance;
+    }
+  make_gpu_representation()
+    {             // make_gpu_representation: Tell the base Graphics_Card_Object what to store for each WebGL Context.
+      return { webGL_buffer_pointers: {} }
     }
   execute_shaders( gl, type )     // execute_shaders(): Draws this shape's entire vertex buffer.
     {       // Draw shapes using indices if they exist.  Otherwise, assume the vertices are arranged as triples.
@@ -575,42 +570,34 @@ class Shader extends Graphics_Card_Object
   copy_onto_graphics_card( context )
     {                                     // copy_onto_graphics_card():  Called automatically as needed to load the 
                                           // shader program onto one of your GPU contexts for its first time.
+      const gpu_instance = super.copy_onto_graphics_card( context ),
+                 program = gpu_instance.program || context.createProgram();
 
-                // Define what this object should store in each new WebGL Context:
-      const initial_gpu_representation = { program: undefined, gpu_addresses: undefined,
-                                          vertShdr: undefined,      fragShdr: undefined };
-                                // Our object might need to register to multiple GPU contexts in the case of 
-                                // multiple drawing areas.  If this is a new GPU context for this object, 
-                                // copy the object to the GPU.  Otherwise, this object already has been 
-                                // copied over, so get a pointer to the existing instance.
-      const gpu_instance = super.copy_onto_graphics_card( context, initial_gpu_representation );
+      const gl     = context;
+      const shared = this.shared_glsl_code() || "";
       
-      const gl = context;
-      const program  = gpu_instance.program  || context.createProgram();
-      const vertShdr = gpu_instance.vertShdr || gl.createShader( gl.VERTEX_SHADER );
-      const fragShdr = gpu_instance.fragShdr || gl.createShader( gl.FRAGMENT_SHADER );
-      
-      if( gpu_instance.vertShdr ) gl.detachShader( program, vertShdr );
-      if( gpu_instance.fragShdr ) gl.detachShader( program, fragShdr );
-
-      gl.shaderSource( vertShdr, this.vertex_glsl_code() );
+      const vertShdr = gl.createShader( gl.VERTEX_SHADER );
+      gl.shaderSource( vertShdr, shared + this.vertex_glsl_code() );
       gl.compileShader( vertShdr );
-      if( !gl.getShaderParameter(vertShdr, gl.COMPILE_STATUS) )
-        throw "Vertex shader compile error: "   + gl.getShaderInfoLog( vertShdr );
+      if( !gl.getShaderParameter(vertShdr, gl.COMPILE_STATUS) ) throw "Vertex shader compile error: "   + gl.getShaderInfoLog( vertShdr );
 
-      gl.shaderSource( fragShdr, this.fragment_glsl_code() );
+      const fragShdr = gl.createShader( gl.FRAGMENT_SHADER );
+      gl.shaderSource( fragShdr, shared + this.fragment_glsl_code() );
       gl.compileShader( fragShdr );
-      if( !gl.getShaderParameter(fragShdr, gl.COMPILE_STATUS) )
-        throw "Fragment shader compile error: " + gl.getShaderInfoLog( fragShdr );
+      if( !gl.getShaderParameter(fragShdr, gl.COMPILE_STATUS) ) throw "Fragment shader compile error: " + gl.getShaderInfoLog( fragShdr );
 
       gl.attachShader( program, vertShdr );
       gl.attachShader( program, fragShdr );
       gl.linkProgram(  program );
-      if( !gl.getProgramParameter( program, gl.LINK_STATUS) )
-        throw "Shader linker error: "           + gl.getProgramInfoLog( this.program );
+      if( !gl.getProgramParameter( program, gl.LINK_STATUS) ) throw "Shader linker error: "           + gl.getProgramInfoLog( this.program );
 
-      Object.assign( gpu_instance, { program, vertShdr, fragShdr, gpu_addresses: new Graphics_Addresses( program, gl ) } );
+      if( !gpu_instance.program )
+        Object.assign( gpu_instance, { program, gpu_addresses: new Graphics_Addresses( program, gl ) } );
       return gpu_instance;
+    }
+  make_gpu_representation() 
+    {             // make_gpu_representation: Tell the base Graphics_Card_Object what to store for each WebGL Context.
+      return { program: undefined, gpu_addresses: undefined }
     }
   activate( context, buffer_pointers, program_state, model_transform, material )
     {                                     // activate(): Selects this Shader in GPU memory so the next shape draws using it.        
@@ -633,9 +620,10 @@ class Shader extends Graphics_Card_Object
                                 attribute.normalized, attribute.stride, attribute.pointer );       // from the active buffer.
       }
     }                           // Your custom Shader has to override the following functions:    
-  vertex_glsl_code(){}
-  fragment_glsl_code(){}
-  update_GPU(){}
+    vertex_glsl_code(){}
+    fragment_glsl_code(){}
+    shared_glsl_code(){}
+    update_GPU(){}
 
         // *** How those four functions work (and how GPU shader programs work in general):
           
@@ -676,6 +664,8 @@ class Shader extends Graphics_Card_Object
                              // new triangle is closer to the camera, and even if so, blending settings may interpolate some 
                              // of the old color into the result.  Finally, an image is displayed onscreen.
 
+                             // The "shared_glsl_code" string defined above is appended to the beginning of both shaders.
+
                              // You must define an update_GPU() function that includes the extra custom JavaScript code 
                              // needed to populate your particular shader program with all the data values it is expecting.
 }
@@ -699,15 +689,7 @@ class Texture extends Graphics_Card_Object
   copy_onto_graphics_card( context, need_initial_settings = true )
     {                                     // copy_onto_graphics_card():  Called automatically as needed to load the 
                                           // texture image onto one of your GPU contexts for its first time.
-      
-                // Define what this object should store in each new WebGL Context:
-      const initial_gpu_representation = { texture_buffer_pointer: undefined };
-                                // Our object might need to register to multiple GPU contexts in the case of 
-                                // multiple drawing areas.  If this is a new GPU context for this object, 
-                                // copy the object to the GPU.  Otherwise, this object already has been 
-                                // copied over, so get a pointer to the existing instance.
-      const gpu_instance = super.copy_onto_graphics_card( context, initial_gpu_representation );
-
+       const gpu_instance = super.copy_onto_graphics_card( context );
       if( !gpu_instance.texture_buffer_pointer ) gpu_instance.texture_buffer_pointer = context.createTexture();
 
       const gl = context;
@@ -723,6 +705,10 @@ class Texture extends Graphics_Card_Object
       if( this.min_filter = "LINEAR_MIPMAP_LINEAR" )      // If the user picked tri-linear sampling (the default) then generate
         gl.generateMipmap(gl.TEXTURE_2D);                 // the necessary "mips" of the texture and store them on the GPU with it.
       return gpu_instance;
+    }
+  make_gpu_representation()
+    {              // make_gpu_representation: Tell the base Graphics_Card_Object what to store for each WebGL Context.
+       return { texture_buffer_pointer: undefined }
     }
   activate( context, texture_unit = 0 )
     {                                     // activate(): Selects this Texture in GPU memory so the next shape draws using it.
