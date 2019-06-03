@@ -85,6 +85,7 @@ I) Mandelbrot set
 	- self similar arpeggiation played by hand
 
 II) Sierenpinski Carpet
+	
 	i) Overview of Sierenpinski Carpet
 	
 	The Sierepenpinski Carpet is a self-similar set of squares which is generated
@@ -103,13 +104,15 @@ II) Sierenpinski Carpet
 	ii) Advanced Feature: infinite zoom via level of detail
 	
 	Similar to the Mandelbrot Set, the Sierenpinksi Carpet utilizes
-	infinite zoom to draw increasing levels of detail as you zoom into the carpet. 		However, the method of implementation varied slightly. 
+	infinite zoom to draw increasing levels of detail as you zoom into the carpet.
+	However, the method of implementation varied slightly. 
 	We decided to take a level of detail approach to the carpet. When
 	the camera zooms into a particular portion of the carpet, that
 	portion is divided into further squares. However, the rest of the
 	carpet is no longer drawn as it is no longer visible to the viewer.
 	Therefore, it appears to the viewer that they are zooming the set
-	infinitely when in reality they are zooming into one portion of the original set 	and seeing that original set redrawn given their current
+	infinitely when in reality they are zooming into one portion of the original set
+	and seeing that original set redrawn given their current
 	camera position and field of view of the carpet. 
 
 	We implemented this by creating a data structure which stores the
