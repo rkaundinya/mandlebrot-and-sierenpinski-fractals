@@ -10,7 +10,7 @@ class Transforms_Sandbox extends Transforms_Sandbox_Base
   constructor() {
     super(); 
 
-    this.audio = new Audio('assets/recure.mp3');
+    this.audio = new Audio('assets/continuum.mp3');
     this.audio.loop = true;
 
     //TOGGLE BETWEEN FRACTALS
@@ -270,6 +270,7 @@ class Transforms_Sandbox extends Transforms_Sandbox_Base
       this.view_mandelbrot = !this.view_mandelbrot;
       this.just_toggled = true;
     }); 
+    this.key_triggered_button("Mute Audio", ["m"], () => this.audio.muted = !this.audio.muted); 
   }
 
   display( context, program_state ) {                                                
